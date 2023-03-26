@@ -10,4 +10,6 @@ The released source codes only support Falcon-512 and Mitaka-512. You can compil
 - Change the artitecture that matches your GPU (-arch sm_86). Currently it supports CUDA compute capability 8.6, which is tested on RTX 3080 and A100.
 - Change the CUDA path (CUDA_ROOT_DIR) and NVCC.
 
-2) Type "make" to compile and "clean" to remove all binaries.
+2) Type "make" to compile and "make clean" to remove all binaries.
+
+3) 

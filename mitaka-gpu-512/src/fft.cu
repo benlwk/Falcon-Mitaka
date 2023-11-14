@@ -647,7 +647,7 @@ __global__ void poly_point_mul_ntt(uint32_t *out, uint16_t *in)
 
     out[bid*N + tid] = (in[bid*N + tid]*out[bid*N + tid]) %MITAKA_Q;
 }
-
+#wklee, can be improved by using Montgomery or Barrett Reduction
 __global__ void NTT(uint32_t *g_A)
 {
 	uint32_t t = N, j1, j2, tw, U, V;
@@ -675,7 +675,7 @@ __global__ void NTT(uint32_t *g_A)
 	for (i = 0;  i < N/blockDim.x; i ++)    
         g_A[bid*N + i*blockDim.x + tid] = A[i*blockDim.x + tid];
 }
-
+#wklee, can be improved by using Montgomery or Barrett Reduction
 __global__ void iNTT(uint32_t *g_A)
 {
     uint32_t t = 1, h, j1, j2, i, j, tw;

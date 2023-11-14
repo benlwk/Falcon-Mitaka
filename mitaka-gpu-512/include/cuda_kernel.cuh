@@ -12,6 +12,7 @@
 #define MSG_BYTES   32
 #define R           1.32
 #define R_SQUARE    1.7424
+// #define FLOAT_VER   // wklee, use floating point or integer for verification
 
 #if MITAKA_D == 512
   #define N MITAKA_D
@@ -25,6 +26,20 @@
 //   #define GAMMA_SQUARE 258488745.55447942
 #endif
 
+/*
+ * Constants for NTT.
+ *
+ *   n = 2^logn  (2 <= n <= 1024)
+ *   phi = X^n + 1
+ *   q = 12289
+ *   q0i = -1/q mod 2^16
+ *   R = 2^16 mod q
+ *   R2 = 2^32 mod q
+ */
+
+#define Q           12289
+#define MITAKA_INV_Q 12265
+ 
 // From Falcon
 #define CRYPTO_BYTES            690
 #define NONCELEN    40
@@ -38,8 +53,8 @@
 
 #include "../include/fpr.cuh"
 
-void crypto_sign(fpr *h_c1, fpr *h_c2, uint8_t *h_mr);
-void crypto_ver(fpr *h_pk, fpr *h_c1, fpr *h_c2, uint8_t *h_mr);
+void crypto_sign(fpr *h_c1, fpr *h_c2, uint8_t *h_mr, int16_t* h_c1_u);
+void crypto_ver(fpr *h_pk, fpr *h_c1, fpr *h_c2, uint8_t *h_mr, int16_t* h_c1_u);
 
 
 

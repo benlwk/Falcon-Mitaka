@@ -160,6 +160,29 @@ __global__ void shake128_squeezeblocks(fpr *out, uint64_t *state)
     }
 }
 
+__global__ void shake128_squeezeblocks_u(uint32_t *out, uint64_t *state)
+{
+    __shared__ uint8_t buf[SHAKE128_RATE];
+    uint32_t tid = threadIdx.x, bid = blockIdx.x, i, j;
+    uint32_t ctr = 0;
+    uint16_t val;
+
+    while(ctr < MITAKA_D) 
+    {
+        keccak_gpu(state + bid*25);    
+        if(tid<21)store64(buf + 8*tid, state[bid*25 + tid]);
+        for(i=0;i<SHAKE128_RATE && ctr < MITAKA_D;i+=2)
+        {
+            val = (buf[i] | ((uint16_t) buf[i+1] << 8));
+            if(val < 5*MITAKA_Q)
+            {
+                out[bid*N + ctr] = (val%MITAKA_Q);
+                ctr++;
+            }
+        }
+    }
+}
+
 // wklee, fine grain version, 25 threads.
 __global__ void hash_to_point_vartime_par(uint64_t *g_scA, uint64_t *scdptr, uint16_t *x)
 {

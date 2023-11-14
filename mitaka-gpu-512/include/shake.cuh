@@ -107,6 +107,7 @@ __constant__ int d[25] = {
     15, 16, 17, 18, 19 };
 __global__ void shake128_absorb_gpu(uint64_t *out, uint8_t *in, uint64_t inlen) ; 
 __global__ void shake128_squeezeblocks(fpr *out, uint64_t *state);
+__global__ void shake128_squeezeblocks_u(uint32_t *out, uint64_t *state);
 __global__ void normaldist_g(fpr *vec, uint64_t *u, uint64_t *v, uint64_t *e);
 __global__ void shake128_absorb_gpu2(uint64_t *out, uint8_t *in, uint64_t inlen) ;
 __global__ void normaldist_mul_fft_g(fpr *vec, uint64_t *u, uint64_t *v, uint64_t *e, fpr *b);

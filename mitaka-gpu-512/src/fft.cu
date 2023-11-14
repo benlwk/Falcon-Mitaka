@@ -167,7 +167,6 @@ __global__ void poly_muladj_fft_g(fpr *a, const fpr *b)
 }
 
 __global__ void poly_recenter(fpr* p) {
-  // for(int i=0; i < MITAKA_D; ++i) {
   	uint32_t tid = threadIdx.x, bid = blockIdx.x;
 
     p[bid*N + tid].v = fmod(p[bid*N + tid].v, (double) MITAKA_Q);
@@ -175,7 +174,6 @@ __global__ void poly_recenter(fpr* p) {
 		p[bid*N + tid].v -= (double) MITAKA_Q;
     else if(p[bid*N + tid].v < -MITAKA_Q/2)
 		p[bid*N + tid].v += (double) MITAKA_Q;
-  // }
 }
 
 __global__ void poly_add_g(fpr *a, const fpr *b)
@@ -366,6 +364,61 @@ __global__ void poly_copy(fpr *out, fpr *in)
     out[bid*N + tid] = in[bid*N + tid];
 }
 
+__global__ void poly_copy_u32(int32_t *out, fpr *in)
+{    
+    uint32_t tid = threadIdx.x, bid = blockIdx.x;
+    float tmp = in[bid*N + tid].v;
+    out[bid*N + tid] = tmp;
+}
+
+
+ /*  
+ * Reduce s2 elements modulo q ([0..q-1] range).
+ */
+__global__ void reduce_mod(uint32_t *out, int16_t *in)
+{
+    uint32_t tid = threadIdx.x, bid = blockIdx.x;
+    uint32_t w;
+
+    w = (int32_t)in[bid*N + tid];
+    w += Q & -(w >> 31);
+    out[bid*N + tid] = w;
+    // if(tid==0) printf("%u %d\n", out[bid*N + tid], in[bid*N + tid]);
+}
+
+// __global__ void norm_s2(uint16_t *tt, fpr *s2){
+//     /*
+//      * Normalize -s1 elements into the [-q/2..q/2] range.
+//      */
+//     uint32_t tid = threadIdx.x, bid = blockIdx.x;    
+//     int32_t w;
+
+//     w = (int32_t)tt[bid*N + tid];
+//     w -= (int32_t)(Q & -(((Q >> 1) - (uint32_t)w) >> 31));
+//     s2[bid*N + tid].v = (int16_t)w;
+//     // if(tid<16) printf("%u %.4f\n", tt[bid*N + tid], s2[bid*N + tid]);
+// }
+
+__global__ void norm_s2(uint16_t *tt){
+    /*
+     * Normalize -s1 elements into the [-q/2..q/2] range.
+     */
+    uint32_t tid = threadIdx.x, bid = blockIdx.x;    
+    int32_t w;
+
+    w = (int32_t)tt[bid*N + tid];
+    w -= (int32_t)(Q & -(((Q >> 1) - (uint32_t)w) >> 31));
+    ((int16_t *)tt)[bid*N + tid] = (int16_t)w;
+}
+
+__global__ void poly_copy_u16(int16_t *out, fpr *in)
+{    
+    uint32_t tid = threadIdx.x, bid = blockIdx.x;
+    float tmp = in[bid*N + tid].v;
+    out[bid*N + tid] = tmp;
+    // if(out[bid*N + tid]>Q/2 || out[bid*N + tid]<-Q/2) printf("%d %.4f %.4f\n",  out[bid*N + tid], in[bid*N + tid].v, tmp);
+}
+
 
 // wklee, serial implementation
 __device__ void poly_LDL_fft(const fpr * g00,
@@ -523,6 +576,19 @@ __global__ void check_norm(fpr* p1, fpr* p2, uint8_t *reject){
   	// return s <= GAMMA_SQUARE;
 }
 
+__global__ void check_norm_u(int16_t* p1, uint32_t* p2, uint8_t *reject){
+  	uint64_t s = 0;
+  	uint32_t bid = blockIdx.x;
+  	for(int i=0; i < MITAKA_D; ++i)
+    	s += p1[i]*p1[i] + p2[i]*p2[i];  
+    // printf("%u\t", s);
+    if(s <= GAMMA_SQUARE) {
+    	printf("reject signature %u\n", bid);
+    	reject[bid] = 1;
+    }
+  	// return s <= GAMMA_SQUARE;
+}
+
 __global__ void poly_mul_fftx2(fpr *a, fpr *b, fpr *c, fpr *d)
 {
     uint32_t hn;
@@ -560,4 +626,86 @@ __global__ void poly_mul_fft_add(fpr *a, fpr *b, fpr *c)
 
     c[bid*N + tid] = fpr_add(c[bid*N + tid], res_a1);    
     c[bid*N + N/2 + tid] = fpr_add(c[bid*N + N/2 +tid], res_a2);    
+}
+
+
+__device__ uint32_t sub_mod(uint32_t a, uint32_t b)
+{
+  if(a < b) a+=MITAKA_Q;
+  return a - b;
+}
+
+__global__ void poly_add_u(uint32_t *a, uint32_t *b)
+{
+    uint32_t tid = threadIdx.x, bid = blockIdx.x;
+    a[bid*N + tid] = (a[bid*N + tid] + b[bid*N + tid])%MITAKA_Q;    
+}
+
+__global__ void poly_point_mul_ntt(uint32_t *out, uint16_t *in)
+{    
+    uint32_t tid = threadIdx.x, bid = blockIdx.x;
+
+    out[bid*N + tid] = (in[bid*N + tid]*out[bid*N + tid]) %MITAKA_Q;
+}
+
+__global__ void NTT(uint32_t *g_A)
+{
+	uint32_t t = N, j1, j2, tw, U, V;
+	uint32_t m = 1, i, j;
+	uint32_t count = 0;
+	uint32_t tid = threadIdx.x, bid = blockIdx.x;
+	__shared__ uint32_t A[N];
+
+    for (i = 0;  i < N/blockDim.x; i ++)    
+        A[i*blockDim.x + tid] = g_A[bid*N + i*blockDim.x + tid];
+    __syncthreads();
+	while(m < N){
+		t = t/2;
+		tw = S[tid/t + count];
+			
+		U = A[tid%t + (tid/t)*2*t];
+		V = (A[tid%t + (tid/t)*2*t+t]*tw) % MITAKA_Q;
+		
+		A[tid%t + (tid/t)*2*t]   = (U+V) % MITAKA_Q;
+		A[tid%t + (tid/t)*2*t+t] = sub_mod(U, V);
+		count = count + m;
+		m = 2*m;		
+		__syncthreads();
+	}
+	for (i = 0;  i < N/blockDim.x; i ++)    
+        g_A[bid*N + i*blockDim.x + tid] = A[i*blockDim.x + tid];
+}
+
+__global__ void iNTT(uint32_t *g_A)
+{
+    uint32_t t = 1, h, j1, j2, i, j, tw;
+    uint32_t m = N, U, V;
+    uint32_t count=0;
+    uint32_t tid = threadIdx.x, bid = blockIdx.x;
+    __shared__ uint32_t A[N];
+    for (i = 0;  i < N/blockDim.x; i ++)    
+        A[i*blockDim.x + tid] = g_A[bid*N + i*blockDim.x + tid];
+    __syncthreads();    
+    while(m > 1)
+    {        
+        h = m / 2;
+        j2 = j1 + t - 1;
+        tw = inv_S[tid/t + count];
+       
+        U = A[tid%t + (tid/t)*2*t];
+        V = A[tid%t + (tid/t)*2*t+t];
+
+        A[tid%t + (tid/t)*2*t]   = (U+V) % MITAKA_Q;
+        A[tid%t + (tid/t)*2*t+t] = (sub_mod(U, V)*tw)%MITAKA_Q;
+            
+        t = 2 * t;
+        m = m / 2;
+        count = count+m;
+        __syncthreads();
+    }
+
+	A[tid] = (A[tid] * MITAKA_INV_Q) % MITAKA_Q;
+	A[tid+256] = (A[tid+256] * MITAKA_INV_Q) % MITAKA_Q;
+	for (i = 0;  i < N/blockDim.x; i ++)    
+        g_A[bid*N + i*blockDim.x + tid] = A[i*blockDim.x + tid];
 }

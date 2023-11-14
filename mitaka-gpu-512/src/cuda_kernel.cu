@@ -10,7 +10,7 @@
 #include "../include/shake.cuh"
 #include "../include/samplerZ.cuh"
 
-void crypto_sign(fpr *h_c1, fpr *h_c2, uint8_t *h_mr) {
+void crypto_sign(fpr *h_c1, fpr *h_c2, uint8_t *h_mr, int16_t *h_c1_u) {
     cudaEvent_t start, stop;
     float elapsed = 0.0f, totaltime = 0.0f;
     cudaEventCreate(&start);    cudaEventCreate(&stop) ;
@@ -242,6 +242,13 @@ void crypto_sign(fpr *h_c1, fpr *h_c2, uint8_t *h_mr) {
     }
     printf("\nTotal time: %.4f ms, TP: %.0f \n", totaltime/REPEAT, 1000*BATCH/(totaltime/REPEAT));
 
+    for(j=0; j<BATCH; j++) 
+    {
+        for(i=0; i<N; i++) {
+            float tmp = h_c1[j*N + i].v;
+            h_c1_u[j*N + i] = tmp;
+        }
+    }
     
 #ifdef DEBUG
     for(j=0; j<BATCH; j++) for(i=0; i<N; i++)  {
@@ -256,23 +263,32 @@ void crypto_sign(fpr *h_c1, fpr *h_c2, uint8_t *h_mr) {
 
 // h_mr contains message m + signature->r
 // h_c1 contains s1, h_c2 contains s2
-void crypto_ver(fpr *h_pk, fpr *h_c1, fpr *h_c2, uint8_t *h_mr) {
+void crypto_ver(fpr *h_pk, fpr *h_c1, fpr *h_c2, uint8_t *h_mr, int16_t *h_c1_u) {
     cudaEvent_t start, stop;
     float elapsed = 0.0f, totaltime = 0.0f;
     cudaEventCreate(&start);    cudaEventCreate(&stop) ;
 
     int i, j;
     uint8_t *d_mr, *h_rej, *d_rej;
-    fpr *d_pk, *h_cc1, *d_cc1, *h_t, *d_t, *d_c1;
+    fpr *d_pk, *d_cc1, *h_t, *d_t, *d_c1;
     uint64_t *d_tmp;
+    uint32_t *h_t_u32, *d_t_u32, *d_cc1_u;
+    int16_t *d_t_i16, *h_t_i16;
+    uint16_t *h_pk_u16, *d_pk_u16;
 
-    cudaMallocHost((void**) &h_cc1, BATCH* N * sizeof(fpr));
     cudaMallocHost((void**) &h_t, BATCH* N * sizeof(fpr));
     cudaMallocHost((void**) &h_rej, BATCH*sizeof(uint8_t));
+    cudaMallocHost((void**) &h_t_u32,BATCH* N*sizeof(uint32_t));
+    cudaMallocHost((void**) &h_pk_u16,BATCH* N*sizeof(uint32_t));
+    cudaMallocHost((void**) &h_t_i16,BATCH* N*sizeof(int16_t));
 
     cudaMalloc((void**) &d_t, BATCH* N * sizeof(fpr));
+    cudaMalloc((void**) &d_t_u32,BATCH* N*sizeof(uint32_t));
+    cudaMalloc((void**) &d_t_i16,BATCH* N*sizeof(int16_t));
+    cudaMalloc((void**) &d_pk_u16,BATCH* N*sizeof(uint16_t));
     cudaMalloc((void**) &d_pk, BATCH* N * sizeof(fpr));
     cudaMalloc((void**) &d_cc1, BATCH* N * sizeof(fpr));
+    cudaMalloc((void**) &d_cc1_u, BATCH* N * sizeof(uint32_t));
     cudaMalloc((void**) &d_c1, BATCH* N * sizeof(fpr));
     cudaMalloc((void**) &d_pk, BATCH* N * sizeof(fpr));
     cudaMalloc((void**) &d_tmp, BATCH*25* sizeof(uint64_t));
@@ -283,20 +299,27 @@ void crypto_ver(fpr *h_pk, fpr *h_c1, fpr *h_c2, uint8_t *h_mr) {
     // cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte);
     // cudaFuncSetCacheConfig(hash_to_point_vartime_par, cudaFuncCachePreferShared);   
 
-    for(j=0; j<BATCH; j++) 
-    for(i=0; i<N; i++) 
-    {
-        h_pk[j*N + i].v = pk[i];
+    for(j=0; j<BATCH; j++){ 
+        for(i=0; i<N; i++) 
+        {
+                h_pk[j*N + i].v = pk[i];
+                h_pk_u16[j*N + i] = pk_u[i];
+        }
     }
-
     cudaEventRecord(start); 
     for(i=0; i<REPEAT; i++)    
     {        
         cudaMemcpy(d_mr, h_mr, BATCH*(MSG_BYTES+MITAKA_K/8)*sizeof(uint8_t), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_c1, h_c1, BATCH* N*sizeof(fpr), cudaMemcpyHostToDevice);
+#ifdef FLOAT_VER           
         cudaMemcpy(d_pk, h_pk, BATCH* N*sizeof(fpr), cudaMemcpyHostToDevice);
-
+        cudaMemcpy(d_c1, h_c1, BATCH* N*sizeof(fpr), cudaMemcpyHostToDevice);
+#else        
+        cudaMemcpy(d_pk_u16, h_pk_u16, BATCH* N*sizeof(uint16_t), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_t_i16, h_c1_u, BATCH* N*sizeof(int16_t), cudaMemcpyHostToDevice);
+        // cudaMemcpy(d_c1, h_c1, BATCH* N*sizeof(fpr), cudaMemcpyHostToDevice);
+#endif        
         shake128_absorb_gpu2<<<BATCH, 25>>>(d_tmp, d_mr, MSG_BYTES+MITAKA_K/8);
+#ifdef FLOAT_VER        
         shake128_squeezeblocks<<<BATCH, 25>>>(d_cc1, d_tmp);
         poly_copy<<<BATCH,N>>>(d_t, d_c1);
         FFT_SM_g<<<BATCH,N/4>>>(d_t, N, N);
@@ -305,14 +328,26 @@ void crypto_ver(fpr *h_pk, fpr *h_c1, fpr *h_c2, uint8_t *h_mr) {
         poly_add_g<<<BATCH,N>>>(d_t, d_cc1);
         poly_recenter<<<BATCH,N>>>(d_t);
         check_norm<<<BATCH,1>>>(d_c1, d_t, d_rej);
-
+#else
+        shake128_squeezeblocks_u<<<BATCH, 25>>>(d_cc1_u, d_tmp);
+        reduce_mod<<<BATCH,N>>>(d_t_u32, d_t_i16);
+        NTT<<<BATCH, N/2>>>(d_t_u32);
+        poly_point_mul_ntt<<<BATCH, N>>>(d_t_u32, d_pk_u16);
+        iNTT<<<BATCH, N/2>>>(d_t_u32);
+        poly_add_u<<<BATCH, N>>>(d_t_u32, d_cc1_u);
+        check_norm_u<<<BATCH,1>>>(d_t_i16, d_t_u32, d_rej);
+#endif        
+#ifdef FLOAT_VER                
         cudaMemcpy(h_t, d_t, BATCH* N*sizeof(fpr), cudaMemcpyDeviceToHost);
+#else
+        cudaMemcpy(h_t_u32, d_t_u32, BATCH* N*sizeof(uint32_t), cudaMemcpyDeviceToHost);
+#endif
+        // cudaMemcpy(h_rej, d_rej, BATCH*sizeof(uint8_t), cudaMemcpyDeviceToHost);
     }
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&elapsed, start, stop) ;
     printf("\nTotal time: %.4f ms, TP: %.0f \n", elapsed/REPEAT, 1000*BATCH/(elapsed/REPEAT));
-   
 #ifdef DEBUG
     for(j=0; j<BATCH; j++) for(i=0; i<N; i++)  {
         if(h_t[j*N + i].v!= h_t[i].v){

@@ -3,7 +3,7 @@
 ## USER SPECIFIC DIRECTORIES ##
 
 # CUDA directory:
-CUDA_ROOT_DIR=/usr/local/cuda-11.7
+CUDA_ROOT_DIR=/usr/local/cuda-12.1
 
 ##########################################################
 
@@ -19,7 +19,7 @@ CC_LIBS=
 ## NVCC COMPILER OPTIONS ##
 
 # NVCC compiler options:
-NVCC=/usr/local/cuda-11.7/bin/nvcc
+NVCC=/usr/local/cuda-12.1/bin/nvcc
 NVCC_FLAGS=-arch sm_86
 # -rdc=true
 NVCC_LIBS=
